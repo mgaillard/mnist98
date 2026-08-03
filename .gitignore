@@ -1,0 +1,18 @@
+# Build output
+build/
+
+# Trained checkpoints (regenerate from training)
+checkpoints/
+
+# Datasets (regenerate from training)
+data/
+
+# Python
+__pycache__/
+*.egg-info/
+*.pyc
+.venv/
+.pytest_cache/
+
+# IDE
+.vscode/

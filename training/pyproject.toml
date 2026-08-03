@@ -1,0 +1,28 @@
+[project]
+name = "mnist-mlp"
+version = "0.1.0"
+description = "Minimal MLP for MNIST classification"
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "torchvision",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["tests*"]
