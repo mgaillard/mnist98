@@ -27,7 +27,7 @@ INF_TARGET_LINUX_RELEASE := $(BUILD_DIR)/inference
 INF_TARGET_WIN32         := $(BUILD_DIR)/inference-win32.exe
 INF_TARGET_WIN32_SSE     := $(BUILD_DIR)/inference-win32-sse.exe
 
-.PHONY: all clean
+.PHONY: all clean test
 
 all: $(INF_TARGET_LINUX_DEBUG) $(INF_TARGET_LINUX_RELEASE) $(INF_TARGET_WIN32) $(INF_TARGET_WIN32_SSE)
 
@@ -45,6 +45,10 @@ $(INF_TARGET_WIN32): $(INF_SRC) $(INF_HDR) | $(BUILD_DIR)
 
 $(INF_TARGET_WIN32_SSE): $(INF_SRC) $(INF_HDR) | $(BUILD_DIR)
 	$(CC_WIN32) $(CFLAGS_WIN32_SSE) $(LDFLAGS) -o $@ $(INF_SRC)
+
+# Run inference on each digit image and verify the prediction matches.
+test: $(INF_TARGET_LINUX_RELEASE)
+	@bash run_tests.sh
 
 clean:
 	rm -rf $(BUILD_DIR)
