@@ -12,8 +12,8 @@
 #define WEIGHTS_MAGIC 0x4E4D5354U
 
 /* MNIST dataset statistics (computed from training set). */
-#define MNIST_MEAN 0.1307
-#define MNIST_STD  0.3081
+#define MNIST_MEAN 0.1307f
+#define MNIST_STD  0.3081f
 
 static uint32_t read_u32_le_stream(FILE *f, int *ok)
 {
@@ -126,7 +126,7 @@ void normalize_input(float input[MODEL_INPUT])
 {
     int i;
     for (i = 0; i < MODEL_INPUT; i++) {
-        input[i] = (float)(((double)input[i] / 255.0 - MNIST_MEAN) / MNIST_STD);
+        input[i] = ((input[i] / 255.f - MNIST_MEAN) / MNIST_STD);
     }
 }
 
