@@ -52,7 +52,7 @@ See [training/README.md](training/README.md) for full details.
 ```bash
 cd training
 uv sync
-uv run python train.py --epochs 5
+uv run python train.py --epochs 10
 ```
 
 Training saves the best model to two formats:
