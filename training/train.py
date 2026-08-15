@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
 from model import MLP
+from model_quant import QuantisedMLP
 
 
 def get_dataloader(train: bool, batch_size: int = 128) -> DataLoader:
@@ -52,7 +53,7 @@ def train_one_epoch(model: MLP, loader: DataLoader, optimizer, device) -> tuple[
 
 
 @torch.no_grad()
-def evaluate(model: MLP, loader: DataLoader, device) -> float:
+def evaluate(model: nn.Module, loader: DataLoader, device) -> float:
     """Return accuracy on the given loader."""
     model.eval()
     correct = 0
@@ -60,6 +61,24 @@ def evaluate(model: MLP, loader: DataLoader, device) -> float:
     for images, targets in loader:
         images, targets = images.to(device), targets.to(device)
         output = model(images)
+        correct += (output.argmax(1) == targets).sum().item()
+        total += images.size(0)
+    return correct / total
+
+
+@torch.no_grad()
+def evaluate_quantised(model: QuantisedMLP, loader: DataLoader, device) -> float:
+    """Return accuracy of a quantised model on the given loader.
+
+    The quantised model returns int32 logits, so we use argmax directly
+    (no dequantisation needed — argmax is scale-invariant).
+    """
+    model.eval()
+    correct = 0
+    total = 0
+    for images, targets in loader:
+        images, targets = images.to(device), targets.to(device)
+        output = model(images)  # int32 tensor of shape (batch, 10)
         correct += (output.argmax(1) == targets).sum().item()
         total += images.size(0)
     return correct / total
@@ -94,6 +113,19 @@ def main() -> None:
             model.export_weights(f"{args.output}.bin")
             model.export_pt(f"{args.output}.pt")
             print(f"  → saved best weights ({best_acc:.4f})")
+
+    # ------------------------------------------------------------------
+    # Evaluate the quantised model on the test set
+    # ------------------------------------------------------------------
+    print("\n=== Quantised model evaluation ===")
+    cpu_device = torch.device("cpu")
+    quant_model = QuantisedMLP()
+    quant_model.load_from_model(model)
+    quant_model.to(cpu_device)
+    quant_acc = evaluate_quantised(quant_model, test_loader, cpu_device)
+    print(f"Float32  accuracy: {test_acc:.4f}")
+    print(f"Quantised accuracy: {quant_acc:.4f}")
+    print(f"Delta:              {quant_acc - test_acc:+.4f}")
 
 
 if __name__ == "__main__":
