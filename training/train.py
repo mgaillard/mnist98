@@ -17,6 +17,8 @@ from model_quant import QuantisedMLP
 
 def get_dataloader(train: bool, batch_size: int = 128) -> DataLoader:
     """Return a MNIST DataLoader."""
+    # Normalise so that pixels have mean 0.1307 and std 0.3081 (the values for the MNIST training set).
+    # Black pixels become -0.4242, white pixels become 2.8215.
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,)),
