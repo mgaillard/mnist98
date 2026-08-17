@@ -1,12 +1,12 @@
 """Quantized MLP for MNIST (784 → 64 → 10) with integer arithmetic.
 
 All weights and biases are stored in widened integer buffers with per-layer
-scale factors so they can be dequantised back to float32 if needed.
+scale factors so they can be dequantized back to float32 if needed.
 
 Storage rules
 -------------
-  int8 quantised value  →  stored in int16 buffer
-  int16 quantised value →  stored in int32 buffer
+  int8 quantized value  →  stored in int16 buffer
+  int16 quantized value →  stored in int32 buffer
 
 Forward pass (fully integer)
 -----------------------------
@@ -22,6 +22,7 @@ Forward pass (fully integer)
 
 from __future__ import annotations
 
+import math
 import torch
 import torch.nn as nn
 
@@ -43,29 +44,25 @@ def _symmetric_quantize(
 
     Returns
     -------
-    quantised : torch.Tensor
-        Quantised tensor (dtype int16, same shape as *fp32*).
+    quantized : torch.Tensor
+        Quantized tensor (dtype int16, same shape as *fp32*).
     scale : float
-        Scale factor so that ``fp32 ≈ quantised * scale``.
+        Scale factor so that ``fp32 ≈ quantized * scale``.
     """
     assert max_abs != 0.0, "Cannot quantise a tensor with all zeros"
 
-    print(f"Quantising with max_abs={max_abs:.6f} and qmax={qmax}")
-    print(f"Overriding max_abs to 3.0 for testing purposes")
-    max_abs = 2.821487 # TODO: this is a test
-
     scale = max_abs / qmax
     qmin = -(qmax + 1)
-    quantised = (fp32 / scale).round().clamp(qmin, qmax)
-    return quantised, scale
+    quantized = (fp32 / scale).round().clamp(qmin, qmax)
+    return quantized, scale
 
 
 # ---------------------------------------------------------------------------
-# Quantised linear layer
+# Quantized linear layer
 # ---------------------------------------------------------------------------
 
-class QuantisedLinear(nn.Module):
-    """Linear layer whose weights and bias are stored as quantised integers.
+class QuantizedLinear(nn.Module):
+    """Linear layer whose weights and bias are stored as quantized integers.
 
     Parameters
     ----------
@@ -73,8 +70,11 @@ class QuantisedLinear(nn.Module):
         Input dimension.
     out_features :
         Output dimension.
-    qmax :
+    in_qmax :
         Maximum positive quantisation level for weights and bias
+        (127 for int8, 32767 for int16).
+    out_qmax :
+        Maximum positive quantisation level for bias
         (127 for int8, 32767 for int16).
     storage_dtype :
         Dtype of the weight storage buffer
@@ -87,29 +87,46 @@ class QuantisedLinear(nn.Module):
         self,
         in_features: int,
         out_features: int,
-        qmax: int,
+        in_qmax: int,
+        out_qmax: int,
         storage_dtype: torch.dtype,
         output_dtype: torch.dtype,
     ) -> None:
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.qmax = qmax
+        self.in_qmax = in_qmax
+        self.out_qmax = out_qmax
         self.output_dtype = output_dtype
 
-        # Quantised weights — stored in widened buffer
+        # Non-quantized weights (float32)
+        self.register_buffer(
+            "weight",
+            torch.zeros(out_features, in_features, dtype=torch.float32),
+        )
+
+        # Quantized weights — stored in widened buffer
         self.register_buffer(
             "weight_q",
             torch.zeros(out_features, in_features, dtype=storage_dtype),
         )
-        # Quantised bias — stored in widened buffer
+
+        # Non-quantized weights (float32)
+        self.register_buffer(
+            "bias",
+            torch.zeros(out_features, dtype=torch.float32),
+        )
+
+        # Quantized bias — stored in widened buffer
         self.register_buffer(
             "bias_q",
             torch.zeros(out_features, dtype=storage_dtype),
         )
 
         # Per-layer scale factors (float32) for optional dequantisation
-        self.register_buffer("scale", torch.tensor(1.0))
+        self.register_buffer("scale_x", torch.tensor(1.0))
+        self.register_buffer("scale_w", torch.tensor(1.0))
+        self.register_buffer("scale_b", torch.tensor(1.0))
 
     # ------------------------------------------------------------------
     # Loading from float32
@@ -121,22 +138,59 @@ class QuantisedLinear(nn.Module):
         bias: torch.Tensor,
     ) -> None:
         """Symmetrically quantise float32 weights and bias in-place."""
-        # Find the same scale for both weight and bias.
-        weight_max = weight.abs().max().item()
-        bias_max = bias.abs().max().item()
-        max_abs = max(weight_max, bias_max)
+        # Save non-quantized weights and bias for optional dequantisation later
+        self.weight.copy_(weight.to(self.weight.dtype).to(self.weight.device))
+        self.bias.copy_(bias.to(self.bias.dtype).to(self.bias.device))
 
-        w_q, s_w = _symmetric_quantize(weight, max_abs, self.qmax)
-        b_q, s_b = _symmetric_quantize(bias, max_abs, self.qmax)
+        # Find the scale for the input
+        print(f"Hardcoded x_max_abs to 2.821487 for testing purposes")
+        x_max_abs = 4 * 2.821487 # TODO: divide by 4 to leave 2 bits of headroom for the matmul output
+        s_x = x_max_abs / self.in_qmax
+
+        # Find the scale for the weights
+        weight_max_abs = 4 * weight.abs().max().item() # TODO: divide by 4 to leave 2 bits of headroom for the matmul output
+        print(f"Hardcoded weight_max_abs to {weight_max_abs:.6f} for testing purposes")
+
+        # Find the scale for the bias is the product of the input and weight scales
+        # We make sure the final scale is equal to the product of the input and weight scales.
+        # But qmax stays the same because it is the maximum quantization level for the bias.
+        bias_max_abs = x_max_abs * weight_max_abs * self.in_qmax * self.in_qmax
+        assert bias_max_abs > bias.abs().max().item(), "Bias is too large for the input and weight scales"
+
+        w_q, s_w = _symmetric_quantize(weight, weight_max_abs, self.in_qmax)
+        b_q, s_b = _symmetric_quantize(bias, bias_max_abs, self.out_qmax)
+
+        print(f"Maximum w: {weight.abs().max().item():.6f}, weight_max_abs: {weight_max_abs:.6f}")
+        print(f"Maximum w_q: {w_q.abs().max().item():.6f}, scale_w: {s_w:.6f}")
+
+        print(f"Maximum b: {bias.abs().max().item():.6f}, bias_max_abs: {bias_max_abs:.6f}")
+        print(f"Maximum b_q: {b_q.abs().max().item():.6f}, scale_b: {s_b:.6f}")
 
         self.weight_q.copy_(w_q.to(self.weight_q.dtype).to(self.weight_q.device))
         self.bias_q.copy_(b_q.to(self.bias_q.dtype).to(self.bias_q.device))
 
-        assert abs(s_w - s_b) < 1e-6, "Weight and bias scales should match"
-        self.scale.fill_(s_w)
+        self.scale_x.fill_(s_x)
+        self.scale_w.fill_(s_w)
+        self.scale_b.fill_(s_b)
 
     # ------------------------------------------------------------------
-    # Integer forward
+    # Quantize the input
+    # ------------------------------------------------------------------
+
+    def quantize_input(self, x: torch.Tensor) -> torch.Tensor:
+        """Quantise float32 input to values compatible with the layer's weights and bias.
+
+        Uses symmetric quantisation centred at zero.
+        The quantisation is the same as for the weights so that the matmul is scale-consistent.
+        """
+        scale = self.scale_x.item()
+        qmax = self.in_qmax
+        qmin = -(qmax + 1)
+
+        return (x / scale).round().clamp(qmin, qmax).to(self.weight_q.dtype)
+
+    # ------------------------------------------------------------------
+    # Forward methods
     # ------------------------------------------------------------------
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -149,27 +203,45 @@ class QuantisedLinear(nn.Module):
         """
         w = self.weight_q.to(self.output_dtype)
         b = self.bias_q.to(self.output_dtype)
+
         result = x.to(self.output_dtype) @ w.t() + b
-        if self.output_dtype == torch.int16:
-            result = result.to(torch.int16)
+        
         return result
+
+    def forward_float_quantized(self, x: torch.Tensor) -> torch.Tensor:
+        """Float32 forward pass using quantized weights and bias.
+
+        This is useful for testing the quantisation error.
+        """
+        xq = self.quantize_input(x)
+
+        yq = self.forward(xq)
+
+        y = yq.to(torch.float32) * self.scale_b.item()
+
+        return y
+
+    def forward_float(self, x: torch.Tensor) -> torch.Tensor:
+        """Float32 forward pass: ``x @ W^T + B`` computed in float32."""
+        return x @ self.weight.t() + self.bias
 
     # ------------------------------------------------------------------
     # Dequantisation helpers
     # ------------------------------------------------------------------
 
     def dequantize(self) -> tuple[torch.Tensor, torch.Tensor]:
-        """Reconstruct float32 weights and bias from quantised storage."""
+        """Reconstruct float32 weights and bias from quantized storage."""
         w = self.weight_q.to(torch.float32) * self.scale_w.item()
         b = self.bias_q.to(torch.float32) * self.scale_b.item()
+
         return w, b
 
 
 # ---------------------------------------------------------------------------
-# Quantised MLP
+# Quantized MLP
 # ---------------------------------------------------------------------------
 
-class QuantisedMLP(nn.Module):
+class QuantizedMLP(nn.Module):
     """Two-layer perceptron with fully integer arithmetic forward pass.
 
     Architecture::
@@ -194,39 +266,24 @@ class QuantisedMLP(nn.Module):
         # TODO: get the maximum value from the input data as parameter and give it to the layers.
 
         # Layer 1 — int8 weights/bias, int16 output
-        self.fc1 = QuantisedLinear(
+        self.fc1 = QuantizedLinear(
             in_features=784,
             out_features=64,
-            qmax=127,                  # int8
-            storage_dtype=torch.int16, # int8 → int16
-            output_dtype=torch.int16,
-        )
-
-        # Layer 2 — int16 weights/bias, int32 output
-        self.fc2 = QuantisedLinear(
-            in_features=64,
-            out_features=10,
-            qmax=32767,                # int16
+            in_qmax=32767,             # int16
+            out_qmax=2147483647,       # int32
             storage_dtype=torch.int32, # int16 → int32
             output_dtype=torch.int32,
         )
 
-    # ------------------------------------------------------------------
-    # Input quantisation
-    # ------------------------------------------------------------------
-
-    def _quantize_input(self, x: torch.Tensor) -> torch.Tensor:
-        """Quantise float32 input to int8 values stored as int16.
-
-        Uses symmetric quantisation centred at zero.
-        The quantisation is the same as for the first layer so that the matmul is scale-consistent.
-        """
-
-        scale = self.fc1.scale.item()
-        qmax = self.fc1.qmax
-        qmin = -(qmax + 1)
-
-        return (x / scale).round().clamp(qmin, qmax).to(torch.int16)
+        # Layer 2 — int16 weights/bias, int32 output
+        self.fc2 = QuantizedLinear(
+            in_features=64,
+            out_features=10,
+            in_qmax=32767,             # int16
+            out_qmax=2147483647,       # int32
+            storage_dtype=torch.int32, # int16 → int32
+            output_dtype=torch.int32,
+        )
 
     # ------------------------------------------------------------------
     # Integer forward
@@ -247,14 +304,23 @@ class QuantisedMLP(nn.Module):
         """
         x = x.view(x.size(0), -1)  # flatten to (batch, 784)
 
-        # 1. Quantise input: float32 → int8 (stored as int16)
-        x = self._quantize_input(x)
+        test1 = self.fc1.forward_float_quantized(x)
+        test2 = self.fc1.forward_float(x)
+
+        error = (test1 - test2).abs().max().item()
+        print(f"Max error in fc1 forward: {error:.6f}")
+
+        # 1. Quantise input: float32 → int16 (stored as int32)
+        x = self.fc1.quantize_input(x)
 
         # 2. Layer 1: int16 @ int16.T → int16 + int16 → int16
         x = self.fc1(x)
 
         # 3. ReLU: max(0, x) on int16 → stays int16
         x = torch.clamp(x, min=0)
+
+        # TODO: rescale to int16 range
+        x = torch.bitwise_right_shift(x, 16)
 
         # 4. Layer 2: int16 @ int32.T → int32 + int32 → int32
         x = self.fc2(x)
@@ -314,7 +380,7 @@ class QuantisedMLP(nn.Module):
         return int32_output.to(torch.float32) * output_scale
 
     def dequantize_all(self) -> dict[str, torch.Tensor]:
-        """Return all weights and biases dequantised to float32."""
+        """Return all weights and biases dequantized to float32."""
         w1, b1 = self.fc1.dequantize()
         w2, b2 = self.fc2.dequantize()
         return {

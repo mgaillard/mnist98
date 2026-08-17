@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
 from model import MLP
-from model_quant import QuantisedMLP
+from model_quant import QuantizedMLP
 
 
 def get_dataloader(train: bool, batch_size: int = 128) -> DataLoader:
@@ -69,10 +69,10 @@ def evaluate(model: nn.Module, loader: DataLoader, device) -> float:
 
 
 @torch.no_grad()
-def evaluate_quantised(model: QuantisedMLP, loader: DataLoader, device) -> float:
-    """Return accuracy of a quantised model on the given loader.
+def evaluate_quantized(model: QuantizedMLP, loader: DataLoader, device) -> float:
+    """Return accuracy of a quantized model on the given loader.
 
-    The quantised model returns int32 logits, so we use argmax directly
+    The quantized model returns int32 logits, so we use argmax directly
     (no dequantisation needed — argmax is scale-invariant).
     """
     model.eval()
@@ -117,16 +117,16 @@ def main() -> None:
             print(f"  → saved best weights ({best_acc:.4f})")
 
     # ------------------------------------------------------------------
-    # Evaluate the quantised model on the test set
+    # Evaluate the quantized model on the test set
     # ------------------------------------------------------------------
-    print("\n=== Quantised model evaluation ===")
+    print("\n=== Quantized model evaluation ===")
     cpu_device = torch.device("cpu")
-    quant_model = QuantisedMLP()
+    quant_model = QuantizedMLP()
     quant_model.load_from_model(model)
     quant_model.to(cpu_device)
-    quant_acc = evaluate_quantised(quant_model, test_loader, cpu_device)
+    quant_acc = evaluate_quantized(quant_model, test_loader, cpu_device)
     print(f"Float32  accuracy: {test_acc:.4f}")
-    print(f"Quantised accuracy: {quant_acc:.4f}")
+    print(f"Quantized accuracy: {quant_acc:.4f}")
     print(f"Delta:              {quant_acc - test_acc:+.4f}")
 
 
