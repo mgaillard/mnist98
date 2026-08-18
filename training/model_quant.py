@@ -154,7 +154,7 @@ class QuantizedLinear(nn.Module):
         # Find the scale for the bias is the product of the input and weight scales
         # We make sure the final scale is equal to the product of the input and weight scales.
         # But qmax stays the same because it is the maximum quantization level for the bias.
-        bias_max_abs = x_max_abs * weight_max_abs * self.in_qmax * self.in_qmax
+        bias_max_abs = x_max_abs * weight_max_abs * self.in_qmax
         assert bias_max_abs > bias.abs().max().item(), "Bias is too large for the input and weight scales"
 
         w_q, s_w = _symmetric_quantize(weight, weight_max_abs, self.in_qmax)
@@ -270,7 +270,7 @@ class QuantizedMLP(nn.Module):
             in_features=784,
             out_features=64,
             in_qmax=32767,             # int16
-            out_qmax=2147483647,       # int32
+            out_qmax=32767,            # int16
             storage_dtype=torch.int32, # int16 → int32
             output_dtype=torch.int32,
         )
@@ -280,7 +280,7 @@ class QuantizedMLP(nn.Module):
             in_features=64,
             out_features=10,
             in_qmax=32767,             # int16
-            out_qmax=2147483647,       # int32
+            out_qmax=32767,            # int16
             storage_dtype=torch.int32, # int16 → int32
             output_dtype=torch.int32,
         )
