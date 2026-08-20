@@ -70,11 +70,8 @@ class QuantizedLinear(nn.Module):
         Input dimension.
     out_features :
         Output dimension.
-    in_qmax :
+    qmax :
         Maximum positive quantisation level for weights and bias
-        (127 for int8, 32767 for int16).
-    out_qmax :
-        Maximum positive quantisation level for bias
         (127 for int8, 32767 for int16).
     storage_dtype :
         Dtype of the weight storage buffer
@@ -87,16 +84,14 @@ class QuantizedLinear(nn.Module):
         self,
         in_features: int,
         out_features: int,
-        in_qmax: int,
-        out_qmax: int,
+        qmax: int,
         storage_dtype: torch.dtype,
         output_dtype: torch.dtype,
     ) -> None:
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        self.in_qmax = in_qmax
-        self.out_qmax = out_qmax
+        self.qmax = qmax
         self.output_dtype = output_dtype
 
         # Non-quantized weights (float32)
@@ -142,23 +137,26 @@ class QuantizedLinear(nn.Module):
         self.weight.copy_(weight.to(self.weight.dtype).to(self.weight.device))
         self.bias.copy_(bias.to(self.bias.dtype).to(self.bias.device))
 
+        # TODO: Try to have different qmax for input and weights so that the first input is only 8 bits but weights are 16 bits.
+        # TODO: This way we can directly read pixels from the MNIST dataset in 8 bits.
+        
         # Find the scale for the input
         print(f"Hardcoded x_max_abs to 2.821487 for testing purposes")
-        x_max_abs = 4 * 2.821487 # TODO: divide by 4 to leave 2 bits of headroom for the matmul output
-        s_x = x_max_abs / self.in_qmax
+        x_max_abs = 4 * 2.821487 # TODO: divide by 2 to leave 1 bits of headroom for the matmul output
+        s_x = x_max_abs / self.qmax
 
         # Find the scale for the weights
-        weight_max_abs = 4 * weight.abs().max().item() # TODO: divide by 4 to leave 2 bits of headroom for the matmul output
+        weight_max_abs = 4 * weight.abs().max().item() # TODO: divide by 2 to leave 1 bits of headroom for the matmul output
         print(f"Hardcoded weight_max_abs to {weight_max_abs:.6f} for testing purposes")
 
         # Find the scale for the bias is the product of the input and weight scales
         # We make sure the final scale is equal to the product of the input and weight scales.
-        # But qmax stays the same because it is the maximum quantization level for the bias.
-        bias_max_abs = x_max_abs * weight_max_abs * self.in_qmax
+        # And qmax is squared because it is when b is added to W*x it's done in double the precision of W and x.
+        bias_max_abs = x_max_abs * weight_max_abs
         assert bias_max_abs > bias.abs().max().item(), "Bias is too large for the input and weight scales"
 
-        w_q, s_w = _symmetric_quantize(weight, weight_max_abs, self.in_qmax)
-        b_q, s_b = _symmetric_quantize(bias, bias_max_abs, self.out_qmax)
+        w_q, s_w = _symmetric_quantize(weight, weight_max_abs, self.qmax)
+        b_q, s_b = _symmetric_quantize(bias, bias_max_abs, self.qmax * self.qmax)
 
         print(f"Maximum w: {weight.abs().max().item():.6f}, weight_max_abs: {weight_max_abs:.6f}")
         print(f"Maximum w_q: {w_q.abs().max().item():.6f}, scale_w: {s_w:.6f}")
@@ -184,7 +182,7 @@ class QuantizedLinear(nn.Module):
         The quantisation is the same as for the weights so that the matmul is scale-consistent.
         """
         scale = self.scale_x.item()
-        qmax = self.in_qmax
+        qmax = self.qmax
         qmin = -(qmax + 1)
 
         return (x / scale).round().clamp(qmin, qmax).to(self.weight_q.dtype)
@@ -269,8 +267,7 @@ class QuantizedMLP(nn.Module):
         self.fc1 = QuantizedLinear(
             in_features=784,
             out_features=64,
-            in_qmax=32767,             # int16
-            out_qmax=32767,            # int16
+            qmax=32767,             # int16
             storage_dtype=torch.int32, # int16 → int32
             output_dtype=torch.int32,
         )
@@ -279,8 +276,7 @@ class QuantizedMLP(nn.Module):
         self.fc2 = QuantizedLinear(
             in_features=64,
             out_features=10,
-            in_qmax=32767,             # int16
-            out_qmax=32767,            # int16
+            qmax=32767,             # int16
             storage_dtype=torch.int32, # int16 → int32
             output_dtype=torch.int32,
         )
@@ -319,8 +315,10 @@ class QuantizedMLP(nn.Module):
         # 3. ReLU: max(0, x) on int16 → stays int16
         x = torch.clamp(x, min=0)
 
-        # TODO: rescale to int16 range
-        x = torch.bitwise_right_shift(x, 16)
+        # Rescale to int16 range
+        x = torch.bitwise_right_shift(x, 18) # TODO: check if 16, or 17, or 18
+
+        # TODO: we need to get the maximum value of x here for the next layer to quantize it properly.
 
         # 4. Layer 2: int16 @ int32.T → int32 + int32 → int32
         x = self.fc2(x)
