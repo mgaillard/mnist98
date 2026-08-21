@@ -31,6 +31,18 @@ class MLP(nn.Module):
         x = self.fc2(x)
         return x
 
+    def forward_fc1(self, x: torch.Tensor) -> torch.Tensor:
+        """Run the first layer only."""
+        x = x.view(x.size(0), -1)  # flatten to (batch, 784)
+        x = self.fc1(x)
+        return x
+
+    def forward_fc1_relu(self, x: torch.Tensor) -> torch.Tensor:
+        """Run the first layer and ReLU only."""
+        x = x.view(x.size(0), -1)  # flatten to (batch, 784)
+        x = self.relu(self.fc1(x))
+        return x
+
     # ------------------------------------------------------------------
     # PyTorch export
     # ------------------------------------------------------------------

@@ -22,10 +22,10 @@ Forward pass (fully integer)
 
 from __future__ import annotations
 
-import math
 import torch
 import torch.nn as nn
 
+from model import MLP
 
 # ---------------------------------------------------------------------------
 # Symmetric quantisation helper
@@ -129,6 +129,7 @@ class QuantizedLinear(nn.Module):
 
     def load_from_float(
         self,
+        x: torch.Tensor,
         weight: torch.Tensor,
         bias: torch.Tensor,
     ) -> None:
@@ -141,19 +142,30 @@ class QuantizedLinear(nn.Module):
         # TODO: This way we can directly read pixels from the MNIST dataset in 8 bits.
         
         # Find the scale for the input
-        print(f"Hardcoded x_max_abs to 2.821487 for testing purposes")
-        x_max_abs = 4 * 2.821487 # TODO: divide by 2 to leave 1 bits of headroom for the matmul output
+        x_max_abs = x.abs().max().item()
         s_x = x_max_abs / self.qmax
 
         # Find the scale for the weights
-        weight_max_abs = 4 * weight.abs().max().item() # TODO: divide by 2 to leave 1 bits of headroom for the matmul output
-        print(f"Hardcoded weight_max_abs to {weight_max_abs:.6f} for testing purposes")
+        # Each component of the input multiplied by the weight matrix is the sum of 784 products,
+        # so we need to make sure that the maximum value of the weight matrix is small enough to avoid overflow.
+        # We consider that the input, which we don't control, can be at its maximum value, whereas the weight matrix is fixed.
+        # Therefore, we compute the product wx_max and check what is the maximum absolute value in it.
+        # We find the scale for the int32 so that the maximum theoretical value of the product is within the range of int32.
+        # And since we compute the maximum value of the product, we need to divide it by the maximum value of the input to find the maximum value of the weight matrix.
+        x_max = torch.ones_like(x) * x_max_abs
+        wx_max = x_max @ weight.t()
+        wx_max_abs = wx_max.abs().max().item()
+        weight_max_abs = wx_max_abs / x_max_abs
 
         # Find the scale for the bias is the product of the input and weight scales
         # We make sure the final scale is equal to the product of the input and weight scales.
         # And qmax is squared because it is when b is added to W*x it's done in double the precision of W and x.
         bias_max_abs = x_max_abs * weight_max_abs
         assert bias_max_abs > bias.abs().max().item(), "Bias is too large for the input and weight scales"
+
+        # TODO: here we want to make sure that there won't be any overflow by design
+        # We need to compare bias.abs().max().item() to bias_max_abs and make sure it can fit in the max value of int32 - self.qmax * self.qmax
+        # assert wx_max_abs + bias.abs().max().item()
 
         w_q, s_w = _symmetric_quantize(weight, weight_max_abs, self.qmax)
         b_q, s_b = _symmetric_quantize(bias, bias_max_abs, self.qmax * self.qmax)
@@ -203,6 +215,10 @@ class QuantizedLinear(nn.Module):
         b = self.bias_q.to(self.output_dtype)
 
         result = x.to(self.output_dtype) @ w.t() + b
+
+        # Do the computations in int64 and check for overflow
+        m = x.to(torch.int64) @ self.weight_q.to(torch.int64).t() + b.to(torch.int64)
+        assert m.abs().max().item() <= torch.iinfo(self.output_dtype).max, "Overflow detected in matmul result"
         
         return result
 
@@ -261,8 +277,6 @@ class QuantizedMLP(nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
-        # TODO: get the maximum value from the input data as parameter and give it to the layers.
-
         # Layer 1 — int8 weights/bias, int16 output
         self.fc1 = QuantizedLinear(
             in_features=784,
@@ -300,12 +314,6 @@ class QuantizedMLP(nn.Module):
         """
         x = x.view(x.size(0), -1)  # flatten to (batch, 784)
 
-        test1 = self.fc1.forward_float_quantized(x)
-        test2 = self.fc1.forward_float(x)
-
-        error = (test1 - test2).abs().max().item()
-        print(f"Max error in fc1 forward: {error:.6f}")
-
         # 1. Quantise input: float32 → int16 (stored as int32)
         x = self.fc1.quantize_input(x)
 
@@ -316,9 +324,7 @@ class QuantizedMLP(nn.Module):
         x = torch.clamp(x, min=0)
 
         # Rescale to int16 range
-        x = torch.bitwise_right_shift(x, 18) # TODO: check if 16, or 17, or 18
-
-        # TODO: we need to get the maximum value of x here for the next layer to quantize it properly.
+        x = torch.bitwise_right_shift(x, 16)
 
         # 4. Layer 2: int16 @ int32.T → int32 + int32 → int32
         x = self.fc2(x)
@@ -336,30 +342,46 @@ class QuantizedMLP(nn.Module):
     # Loading from float32 model
     # ------------------------------------------------------------------
 
-    def load_from_float_state_dict(
-        self,
-        state_dict: dict[str, torch.Tensor],
-    ) -> None:
-        """Load weights from a standard float32 MLP state_dict and quantise.
-
+    def load_from_model(self, model: MLP, x: torch.Tensor) -> None:
+        """Convenience wrapper: quantise from an fp32 MLP instance.
+        
         Parameters
         ----------
-        state_dict :
-            The ``state_dict()`` of an fp32 ``MLP`` (keys like
-            ``fc1.weight``, ``fc1.bias``, ``fc2.weight``, ``fc2.bias``).
+        model :
+            The MLP model to quantize (must have the same architecture as this QuantizedMLP).
+        x :
+            A sample input tensor to determine the input scale for quantization.
         """
+        state_dict = model.state_dict()
+
+        x_flatten = x.view(x.size(0), -1)  # flatten to (batch, 784)
+
         self.fc1.load_from_float(
+            x_flatten,
             state_dict["fc1.weight"],
-            state_dict["fc1.bias"],
-        )
-        self.fc2.load_from_float(
-            state_dict["fc2.weight"],
-            state_dict["fc2.bias"],
+            state_dict["fc1.bias"]
         )
 
-    def load_from_model(self, model: nn.Module) -> None:
-        """Convenience wrapper: quantise from an fp32 MLP instance."""
-        self.load_from_float_state_dict(model.state_dict())
+        # Check the error between fc1_output and fc1_output_q
+        fc1_output = model.forward_fc1(x)
+        fc1_output_q = self.fc1.forward_float_quantized(x_flatten)
+        error = (fc1_output - fc1_output_q).abs().max().item()
+        print(f"Max error in fc1 output: {error:.6f}")
+
+        # Run a partial forward pass to determine the input scale for fc1
+        fc1_relu_output = model.forward_fc1_relu(x)
+
+        self.fc2.load_from_float(
+            fc1_relu_output,
+            state_dict["fc2.weight"],
+            state_dict["fc2.bias"]
+        )
+
+        # Check the error between fc2_output and fc2_output_q
+        fc2_output = model.forward(x)
+        fc2_output_q = self.fc2.forward_float_quantized(fc1_relu_output)
+        error = (fc2_output - fc2_output_q).abs().max().item()
+        print(f"Max error in fc2 output: {error:.6f}")
 
     # ------------------------------------------------------------------
     # Dequantisation helpers
