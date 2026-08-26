@@ -118,13 +118,15 @@ def main() -> None:
 
     # ------------------------------------------------------------------
     # Evaluate the quantized model on the test set
+    # Everything is done on CPU becquse CUDA does not implement some of the int16 operations.
     # ------------------------------------------------------------------
     print("\n=== Quantized model evaluation ===")
     cpu_device = torch.device("cpu")
+    model.to(cpu_device)
     quant_model = QuantizedMLP()
-    sample_images, _ = next(iter(test_loader)) # Get a batch of images to determine input scale for quantization
-    quant_model.load_from_model(model, sample_images.to(device))
     quant_model.to(cpu_device)
+    sample_images, _ = next(iter(test_loader)) # Get a batch of images to determine input scale for quantization
+    quant_model.load_from_model(model, sample_images.to(cpu_device))
     quant_acc = evaluate_quantized(quant_model, test_loader, cpu_device)
     print(f"Float32  accuracy: {test_acc:.4f}")
     print(f"Quantized accuracy: {quant_acc:.4f}")

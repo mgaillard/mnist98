@@ -5,17 +5,16 @@ scale factors so they can be dequantized back to float32 if needed.
 
 Storage rules
 -------------
-  int8 quantized value  →  stored in int16 buffer
   int16 quantized value →  stored in int32 buffer
 
 Forward pass (fully integer)
 -----------------------------
   Input (float32)
-    → symmetric quantise to int8, stored as int16
-    → Layer 1: int8-w (int16 buf) @ int8-x (int16 buf) + int8-b (int16 buf)
-              → int16 output
-    → ReLU: max(0, x) on int16 → int16
-    → Layer 2: int16-w (int32 buf) @ int16-x (int16 buf) + int16-b (int32 buf)
+    → symmetric quantise to int16, stored as int32
+    → Layer 1: int16-w (int32 buf) @ int16-x (int32 buf) + int32-b (int32 buf)
+              → int32 output
+    → ReLU: max(0, x) on int32 → int32
+    → Layer 2: int16-w (int32 buf) @ int16-x (int32 buf) + int32-b (int32 buf)
               → int32 output
     → argmax on int32 (no dequantisation needed)
 """
@@ -119,9 +118,9 @@ class QuantizedLinear(nn.Module):
         )
 
         # Per-layer scale factors (float32) for optional dequantisation
-        self.register_buffer("scale_x", torch.tensor(1.0))
-        self.register_buffer("scale_w", torch.tensor(1.0))
-        self.register_buffer("scale_b", torch.tensor(1.0))
+        self.register_buffer("scale_x", torch.tensor(1.0, dtype=torch.float32))
+        self.register_buffer("scale_w", torch.tensor(1.0, dtype=torch.float32))
+        self.register_buffer("scale_b", torch.tensor(1.0, dtype=torch.float32))
 
     # ------------------------------------------------------------------
     # Loading from float32
@@ -261,15 +260,16 @@ class QuantizedMLP(nn.Module):
     Architecture::
 
         Input(float32)
-          → quantise to int8 (stored as int16)
+          → quantise to int16 (stored as int32)
           → Linear(784, 64):
-              weights  : int8 in int16 buffer
-              bias     : int8 in int16 buffer
-              output   : int16
-          → ReLU(max(0, x)) on int16 → int16
+              weights  : int16 in int32 buffer
+              bias     : int32 in int32 buffer
+              output   : int32
+          → ReLU(max(0, x)) on int32 → int32
+          → Divide by 2^16 to rescale to int16 range
           → Linear(64, 10):
               weights  : int16 in int32 buffer
-              bias     : int16 in int32 buffer
+              bias     : int32 in int32 buffer
               output   : int32
           → argmax on int32 (scale-invariant, no dequantisation needed)
     """
@@ -277,20 +277,20 @@ class QuantizedMLP(nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
-        # Layer 1 — int8 weights/bias, int16 output
+        # Layer 1 — int16 weights, int32 bias, int32 output
         self.fc1 = QuantizedLinear(
             in_features=784,
             out_features=64,
-            qmax=32767,             # int16
+            qmax=32767,                # int16
             storage_dtype=torch.int32, # int16 → int32
             output_dtype=torch.int32,
         )
 
-        # Layer 2 — int16 weights/bias, int32 output
+        # Layer 2 — int16 weights, int32 bias, int32 output
         self.fc2 = QuantizedLinear(
             in_features=64,
             out_features=10,
-            qmax=32767,             # int16
+            qmax=32767,                # int16
             storage_dtype=torch.int32, # int16 → int32
             output_dtype=torch.int32,
         )
@@ -317,16 +317,16 @@ class QuantizedMLP(nn.Module):
         # 1. Quantise input: float32 → int16 (stored as int32)
         x = self.fc1.quantize_input(x)
 
-        # 2. Layer 1: int16 @ int16.T → int16 + int16 → int16
+        # 2. Layer 1: int16 @ int16.T → int32 + int32 → int32
         x = self.fc1(x)
 
-        # 3. ReLU: max(0, x) on int16 → stays int16
+        # 3. ReLU: max(0, x) on int32 → stays int32
         x = torch.clamp(x, min=0)
 
         # Rescale to int16 range
         x = torch.bitwise_right_shift(x, 16)
 
-        # 4. Layer 2: int16 @ int32.T → int32 + int32 → int32
+        # 4. Layer 2: int16 @ int16.T → int32 + int32 → int32
         x = self.fc2(x)
 
         return x  # int32 logits of shape (batch, 10)
@@ -386,18 +386,6 @@ class QuantizedMLP(nn.Module):
     # ------------------------------------------------------------------
     # Dequantisation helpers
     # ------------------------------------------------------------------
-
-    def dequantize_output(self, int32_output: torch.Tensor) -> torch.Tensor:
-        """Approximately dequantise int32 output back to float32.
-
-        The effective output scale is the product of the input scale and
-        both layers' weight scales.
-        """
-        output_scale = (
-            self.fc1.scale_w.item()
-            * self.fc2.scale_w.item()
-        )
-        return int32_output.to(torch.float32) * output_scale
 
     def dequantize_all(self) -> dict[str, torch.Tensor]:
         """Return all weights and biases dequantized to float32."""
