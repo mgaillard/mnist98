@@ -52,8 +52,9 @@ int main(int argc, char *argv[])
     const char *img_path;
     const char *weights_path;
     int benchmark_count;
+    int pixels_raw[MODEL_INPUT];
     float input[MODEL_INPUT];
-    float pixels[28][28];
+    int pixels[28][28];
     model_t *model;
     int predicted;
     int i, x, y;
@@ -102,12 +103,12 @@ int main(int argc, char *argv[])
     /* Flatten 28x28 to 784 (row-major). */
     for (y = 0; y < 28; y++) {
         for (x = 0; x < 28; x++) {
-            input[y * 28 + x] = pixels[y][x];
+            pixels_raw[y * 28 + x] = pixels[y][x];
         }
     }
 
     /* Normalize to MNIST training distribution. */
-    normalize_input(input);
+    normalize_input(pixels_raw, input);
 
     /* Load model weights. */
     if (load_weights(weights_path, model) != 0) {

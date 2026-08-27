@@ -31,7 +31,7 @@ typedef struct {
 
 static int rgb_to_grayscale(int r, int g, int b)
 {
-    return (int)(0.299 * (double)r + 0.587 * (double)g + 0.114 * (double)b);
+    return (int)(0.299f * (float)r + 0.587f * (float)g + 0.114f * (float)b);
 }
 
 static uint32_t read_u32_le(const uint8_t *p)
@@ -47,7 +47,7 @@ static uint16_t read_u16_le(const uint8_t *p)
     return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
 }
 
-int load_bmp(const char *path, float pixels[28][28])
+int load_bmp(const char *path, int pixels[28][28])
 {
     FILE *f;
     bmp_file_header_t fh;
@@ -107,10 +107,10 @@ int load_bmp(const char *path, float pixels[28][28])
 
     /* Allocate dynamic buffer for image loading before resizing */
     {
-        float *temp_img;
+        int *temp_img;
         uint8_t *row;
 
-        temp_img = (float *)malloc((size_t)(width * height) * sizeof(float));
+        temp_img = (int *)malloc((size_t)(width * height) * sizeof(int));
         row      = (uint8_t *)malloc((size_t)row_size);
 
         if (!temp_img || !row) {
@@ -137,13 +137,13 @@ int load_bmp(const char *path, float pixels[28][28])
 
             if (bpp == 24) {
                 for (x = 0; x < width; x++) {
-                    temp_img[src_y * width + x] = (float)rgb_to_grayscale(
+                    temp_img[src_y * width + x] = rgb_to_grayscale(
                         row[x * 3 + 2], row[x * 3 + 1], row[x * 3 + 0]);
                 }
             } else if (bpp == 8) {
                 for (x = 0; x < width; x++) {
                     uint8_t idx = row[x];
-                    temp_img[src_y * width + x] = (float)rgb_to_grayscale(
+                    temp_img[src_y * width + x] = rgb_to_grayscale(
                         palette[idx][2], palette[idx][1], palette[idx][0]);
                 }
             }
@@ -151,13 +151,13 @@ int load_bmp(const char *path, float pixels[28][28])
 
         /* Sample temp_img into final 28x28 output */
         {
-            double scale_x = (double)width / 28.0;
-            double scale_y = (double)height / 28.0;
+            float scale_x = (float)width / 28.0f;
+            float scale_y = (float)height / 28.0f;
 
             for (y = 0; y < 28; y++) {
                 for (x = 0; x < 28; x++) {
-                    int sx = (int)((double)x * scale_x);
-                    int sy = (int)((double)y * scale_y);
+                    int sx = (int)((float)x * scale_x);
+                    int sy = (int)((float)y * scale_y);
                     if (sx >= width)  sx = width - 1;
                     if (sy >= height) sy = height - 1;
 

@@ -122,11 +122,11 @@ int load_weights(const char *path, model_t *model)
     return 0;
 }
 
-void normalize_input(float input[MODEL_INPUT])
+void normalize_input(const int pixels_raw[MODEL_INPUT], float input[MODEL_INPUT])
 {
     int i;
     for (i = 0; i < MODEL_INPUT; i++) {
-        input[i] = ((input[i] / 255.f - MNIST_MEAN) / MNIST_STD);
+        input[i] = ((pixels_raw[i] / 255.0f - MNIST_MEAN) / MNIST_STD);
     }
 }
 

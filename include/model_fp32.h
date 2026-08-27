@@ -1,7 +1,7 @@
 /* model_fp32.h — MLP model weights and inference for MNIST digit classification. */
 
-#ifndef WEIGHTS_H
-#define WEIGHTS_H
+#ifndef MODEL_FP32_H
+#define MODEL_FP32_H
 
 /* Model dimensions. */
 #define MODEL_INPUT  784
@@ -27,10 +27,10 @@ typedef struct {
  * Applies per-pixel: (pixel / 255.0f - mean) / std
  * where mean = 0.1307 and std = 0.3081 (MNIST dataset stats).
  *
- * Writes in-place into the input array, which must contain
- * raw pixel values in [0, 255].
+ * pixels_raw must contain raw pixel values in the range [0, 255];
+ * the normalized float values are written into input.
  */
-void normalize_input(float input[MODEL_INPUT]);
+void normalize_input(const int pixels_raw[MODEL_INPUT], float input[MODEL_INPUT]);
 
 /*
  * Load model weights from the binary format produced by

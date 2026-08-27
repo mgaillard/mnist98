@@ -4,7 +4,7 @@
 #define BMP_H
 
 /*
- * Load a BMP image and resize to a 28x28 float array.
+ * Load a BMP image and resize to a 28x28 integer array.
  *
  * Supports:
  *   - 24-bit color BMPs (converted to grayscale)
@@ -15,6 +15,6 @@
  *
  * Returns 0 on success, -1 on error.
  */
-int load_bmp(const char *path, float pixels[28][28]);
+int load_bmp(const char *path, int pixels[28][28]);
 
 #endif
