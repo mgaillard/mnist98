@@ -24,10 +24,7 @@ from model import MLP
 
 def load_model(weights_path: str | Path) -> MLP:
     """Load a trained MLP from a .pt checkpoint."""
-    checkpoint = torch.load(weights_path, weights_only=True)
-    model = MLP()
-    model.load_state_dict(checkpoint["model_state"])
-    return model
+    return MLP.from_pretrained(weights_path)
 
 
 def preprocess_image(image_path: str | Path) -> torch.Tensor:

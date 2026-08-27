@@ -72,6 +72,47 @@ class MLP(nn.Module):
             path,
         )
 
+    @classmethod
+    def from_pretrained(
+        cls,
+        path: str | Path,
+        map_location: str | torch.device = "cpu",
+    ) -> MLP:
+        """Load a model previously saved with :meth:`export_pt`.
+
+        Parameters
+        ----------
+        path:
+            Path to the .pt file written by :meth:`export_pt`.
+        map_location:
+            Device to load the tensors onto (default: "cpu").
+
+        Returns
+        -------
+        MLP
+            A new model with the saved weights loaded.
+        """
+        checkpoint = torch.load(Path(path), map_location=map_location, weights_only=True)
+
+        required = ("model_state", "in_size", "hidden_size", "out_size")
+        missing = [key for key in required if key not in checkpoint]
+        if missing:
+            raise ValueError(
+                f"{path} is not a valid export_pt checkpoint: missing keys {missing}"
+            )
+
+        model = cls()
+        expected = (model.fc1.in_features, model.fc1.out_features, model.fc2.out_features)
+        actual = (checkpoint["in_size"], checkpoint["hidden_size"], checkpoint["out_size"])
+        if actual != expected:
+            raise ValueError(
+                f"Architecture mismatch: checkpoint is {actual[0]} → {actual[1]} → {actual[2]}, "
+                f"expected {expected[0]} → {expected[1]} → {expected[2]}"
+            )
+
+        model.load_state_dict(checkpoint["model_state"])
+        return model
+
     # ------------------------------------------------------------------
     # Binary export — C89-friendly format
     # ------------------------------------------------------------------

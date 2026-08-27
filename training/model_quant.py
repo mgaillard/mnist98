@@ -21,6 +21,9 @@ Forward pass (fully integer)
 
 from __future__ import annotations
 
+import struct
+from pathlib import Path
+
 import torch
 import torch.nn as nn
 
@@ -337,6 +340,54 @@ class QuantizedMLP(nn.Module):
         No dequantisation is needed — argmax is scale-invariant.
         """
         return self.forward(x).argmax(dim=1)
+
+    # ------------------------------------------------------------------
+    # Binary export — C89-friendly format
+    # ------------------------------------------------------------------
+
+    def export_weights(self, path: str | Path) -> None:
+        """Write the quantized weights to a little-endian binary file.
+
+        Same layout as :meth:`MLP.export_weights`, except that the
+        weights are stored as int16 and the biases as int32.
+
+        Header (all int32):
+            magic:          0x4E4D5354 ("NMST")
+            num_layers:     2
+            in_dim[0]:      784
+            in_dim[1]:      64
+            out_dim[0]:     64
+            out_dim[1]:     10
+
+        Then, for each layer (in definition order):
+            weights: int16 array of shape (out, in) — row-major
+            bias:    int32 array of shape (out,)
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Layer metadata
+        layers = [
+            (self.fc1.weight_q, self.fc1.bias_q),
+            (self.fc2.weight_q, self.fc2.bias_q),
+        ]
+        in_dims = [784, 64]
+        out_dims = [64, 10]
+
+        with open(path, "wb") as f:
+            # Header
+            f.write(struct.pack("<I", 0x4E4D5354))  # magic
+            f.write(struct.pack("<i", len(layers)))  # num_layers
+            for d in in_dims:
+                f.write(struct.pack("<i", d))
+            for d in out_dims:
+                f.write(struct.pack("<i", d))
+
+            # Weights and biases, layer by layer
+            for w, b in layers:
+                # Row-major: (out, in) — move to CPU first if on GPU
+                f.write(w.detach().cpu().numpy().astype("<i2").tobytes())
+                f.write(b.detach().cpu().numpy().astype("<i4").tobytes())
 
     # ------------------------------------------------------------------
     # Loading from float32 model

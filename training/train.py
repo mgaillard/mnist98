@@ -116,6 +116,10 @@ def main() -> None:
             model.export_pt(f"{args.output}.pt")
             print(f"  → saved best weights ({best_acc:.4f})")
 
+    # At the end of training, we load the best weights and evaluate the model on the test set.
+    model.from_pretrained(f"{args.output}.pt")
+    model.eval()
+
     # ------------------------------------------------------------------
     # Evaluate the quantized model on the test set
     # Everything is done on CPU becquse CUDA does not implement some of the int16 operations.
@@ -127,6 +131,7 @@ def main() -> None:
     quant_model.to(cpu_device)
     sample_images, _ = next(iter(test_loader)) # Get a batch of images to determine input scale for quantization
     quant_model.load_from_model(model, sample_images.to(cpu_device))
+    quant_model.export_weights(f"{args.output}_quant.bin")
     quant_acc = evaluate_quantized(quant_model, test_loader, cpu_device)
     print(f"Float32  accuracy: {test_acc:.4f}")
     print(f"Quantized accuracy: {quant_acc:.4f}")
