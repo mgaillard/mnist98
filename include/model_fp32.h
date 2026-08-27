@@ -1,4 +1,4 @@
-/* weights.h — MLP model weights and inference for MNIST digit classification. */
+/* model_fp32.h — MLP model weights and inference for MNIST digit classification. */
 
 #ifndef WEIGHTS_H
 #define WEIGHTS_H

@@ -35,8 +35,8 @@ All computations are in `float32`. The model uses MNIST normalization (`mean=0.1
 │   └── extract_bmp.py      # Save MNIST samples as BMP images
 │
 ├── src/                    # C89 inference code
-│   ├── inference.c         # Main program (CLI, prediction, benchmark)
-│   ├── weights.c           # Load .bin weight files
+│   ├── main.c              # Main program (CLI, prediction, benchmark)
+│   ├── model_fp32.c        # Contains the fp32 model and method to load .bin weight files
 │   └── bmp.c               # BMP image loader (24-bit + 8-bit palette)
 │
 ├── include/                # C headers

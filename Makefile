@@ -19,8 +19,8 @@ LDFLAGS     :=
 
 BUILD_DIR   := build
 
-INF_SRC         := src/inference.c src/weights.c src/bmp.c
-INF_HDR         := include/types.h include/weights.h include/bmp.h
+INF_SRC         := src/main.c src/model_fp32.c src/bmp.c
+INF_HDR         := include/types.h include/model_fp32.h include/bmp.h
 
 INF_TARGET_LINUX_DEBUG   := $(BUILD_DIR)/inference-debug
 INF_TARGET_LINUX_RELEASE := $(BUILD_DIR)/inference

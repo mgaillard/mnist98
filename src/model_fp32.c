@@ -1,4 +1,4 @@
-/* weights.c — Load MLP weights and run inference on MNIST digits.
+/* model_fp32.c — Load MLP weights and run inference on MNIST digits.
  * C89-compatible.
  */
 
@@ -6,7 +6,7 @@
 #include <stdlib.h>
 
 #include "types.h"
-#include "weights.h"
+#include "model_fp32.h"
 
 /* Magic number: "NMST" in little-endian. */
 #define WEIGHTS_MAGIC 0x4E4D5354U

@@ -1,4 +1,4 @@
-/* inference.c — MNIST digit classification from a BMP image.
+/* main.c — MNIST digit classification from a BMP image.
  * C89-compatible.
  */
 
@@ -8,7 +8,7 @@
 #include <time.h>
 
 #include "bmp.h"
-#include "weights.h"
+#include "model_fp32.h"
 
 static void usage(const char *prog)
 {
