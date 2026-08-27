@@ -139,3 +139,22 @@ The `.bin` file is a flat little-endian structure:
 Layer 0: weights `[64][784]`, bias `[64]` · Layer 1: weights `[10][64]`, bias `[10]`
 
 Total: 203,560 bytes (50,890 float32 values).
+
+## Quant weight format
+
+Same layout as the `.bin` format, but quantized: weights are stored as int16 and biases as int32 (little-endian).
+
+| Offset | Field | Type |
+|--------|-------|------|
+| 0 | magic (`0x4E4D5354`) | int32 |
+| 4 | num_layers | int32 |
+| 8 | in_dim[0..1] | int32[2] |
+| 16 | out_dim[0..1] | int32[2] |
+| 24 | layer 0 weights | int16[64][784] |
+| 100,376 | layer 0 biases | int32[64] |
+| 100,632 | layer 1 weights | int16[10][64] |
+| 101,912 | layer 1 biases | int32[10] |
+
+Layer 0: weights `[64][784]`, bias `[64]` · Layer 1: weights `[10][64]`, bias `[10]`
+
+Total: 101,952 bytes (50,816 int16 weights + 74 int32 biases).
