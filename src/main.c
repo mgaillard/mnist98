@@ -16,7 +16,7 @@ static void usage(const char *prog)
     exit(EXIT_FAILURE);
 }
 
-static void benchmark(const model_t *model, const float input[MODEL_INPUT], int count)
+static void benchmark(const model_fp32_t *model, const float input[MODEL_INPUT], int count)
 {
     clock_t t_start, t_end;
     double elapsed_sec;
@@ -25,11 +25,11 @@ static void benchmark(const model_t *model, const float input[MODEL_INPUT], int 
     int i;
 
     /* Warm-up run */
-    model_predict(model, input);
+    model_fp32_predict(model, input);
 
     t_start = clock();
     for (i = 0; i < count; i++) {
-        model_predict(model, input);
+        model_fp32_predict(model, input);
     }
     t_end = clock();
 
@@ -55,7 +55,7 @@ int main(int argc, char *argv[])
     int pixels_raw[MODEL_INPUT];
     float input[MODEL_INPUT];
     int pixels[28][28];
-    model_t *model;
+    model_fp32_t *model;
     int predicted;
     int i, x, y;
 
@@ -88,7 +88,7 @@ int main(int argc, char *argv[])
     }
 
     /* Allocate model on HEAP to avoid stack overflow (~204 KB) */
-    model = (model_t *)malloc(sizeof(model_t));
+    model = (model_fp32_t *)malloc(sizeof(model_fp32_t));
     if (!model) {
         fprintf(stderr, "Error: out of memory allocating model structure\n");
         return EXIT_FAILURE;
@@ -108,16 +108,16 @@ int main(int argc, char *argv[])
     }
 
     /* Normalize to MNIST training distribution. */
-    normalize_input(pixels_raw, input);
+    model_fp32_normalize_input(pixels_raw, input);
 
     /* Load model weights. */
-    if (load_weights(weights_path, model) != 0) {
+    if (model_fp32_load_weights(weights_path, model) != 0) {
         free(model);
         return EXIT_FAILURE;
     }
 
     /* Run inference */
-    predicted = model_predict(model, input);
+    predicted = model_fp32_predict(model, input);
     printf("%d\n", predicted);
 
     if (benchmark_count > 0) {

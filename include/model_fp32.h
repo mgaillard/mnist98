@@ -9,7 +9,7 @@
 #define MODEL_OUTPUT 10
 
 /*
- * Container for the full set of trained parameters.
+ * Container for the full set of trained parameters (fp32 model).
  *
  * Layout matches the binary format produced by PyTorch's
  * MLP.export_weights() — row-major, no padding.
@@ -19,7 +19,7 @@ typedef struct {
     float b0[MODEL_HIDDEN];               /* Layer 0 bias    (64)       */
     float w1[MODEL_OUTPUT][MODEL_HIDDEN]; /* Layer 1 weights (10 x 64)  */
     float b1[MODEL_OUTPUT];               /* Layer 1 bias    (10)       */
-} model_t;
+} model_fp32_t;
 
 /*
  * Normalize a raw 28x28 image to match the MNIST training distribution.
@@ -30,7 +30,7 @@ typedef struct {
  * pixels_raw must contain raw pixel values in the range [0, 255];
  * the normalized float values are written into input.
  */
-void normalize_input(const int pixels_raw[MODEL_INPUT], float input[MODEL_INPUT]);
+void model_fp32_normalize_input(const int pixels_raw[MODEL_INPUT], float input[MODEL_INPUT]);
 
 /*
  * Load model weights from the binary format produced by
@@ -48,7 +48,7 @@ void normalize_input(const int pixels_raw[MODEL_INPUT], float input[MODEL_INPUT]
  *
  * Returns 0 on success, -1 on error.
  */
-int load_weights(const char *path, model_t *model);
+int model_fp32_load_weights(const char *path, model_fp32_t *model);
 
 /*
  * Run inference on a single digit image.
@@ -61,6 +61,6 @@ int load_weights(const char *path, model_t *model);
  *   y = w1 @ x + b1
  *   return argmax(y)
  */
-int model_predict(const model_t *model, const float input[MODEL_INPUT]);
+int model_fp32_predict(const model_fp32_t *model, const float input[MODEL_INPUT]);
 
 #endif

@@ -29,7 +29,7 @@ static uint32_t read_u32_le_stream(FILE *f, int *ok)
          | ((uint32_t)buf[3] << 24);
 }
 
-int load_weights(const char *path, model_t *model)
+int model_fp32_load_weights(const char *path, model_fp32_t *model)
 {
     FILE *f;
     uint32_t magic;
@@ -122,7 +122,7 @@ int load_weights(const char *path, model_t *model)
     return 0;
 }
 
-void normalize_input(const int pixels_raw[MODEL_INPUT], float input[MODEL_INPUT])
+void model_fp32_normalize_input(const int pixels_raw[MODEL_INPUT], float input[MODEL_INPUT])
 {
     int i;
     for (i = 0; i < MODEL_INPUT; i++) {
@@ -130,7 +130,7 @@ void normalize_input(const int pixels_raw[MODEL_INPUT], float input[MODEL_INPUT]
     }
 }
 
-int model_predict(const model_t *model, const float input[MODEL_INPUT])
+int model_fp32_predict(const model_fp32_t *model, const float input[MODEL_INPUT])
 {
     float hidden[MODEL_HIDDEN];
     float logits[MODEL_OUTPUT];
