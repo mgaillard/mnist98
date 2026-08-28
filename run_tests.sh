@@ -12,14 +12,15 @@ DATA_DIR="${SCRIPT_DIR}/data"
 pass=0
 fail=0
 
-# Run the digit test suite once. The model is selected by the arguments:
-#   run_suite <label> [inference args...]
+# Run the digit test suite once for a given binary.
+#   run_suite <binary> <label> [inference args...]
 run_suite() {
-    local label="$1"
-    shift
+    local binary="$1"
+    local label="$2"
+    shift 2
     for bmp in "${DATA_DIR}"/[0-9].bmp; do
         expected="$(basename "$bmp" .bmp)"
-        predicted="$("$BINARY" "$bmp" "$@")"
+        predicted="$("$binary" "$bmp" "$@")"
         if [ "$predicted" = "$expected" ]; then
             echo "  PASS [$label] $bmp -> $predicted"
             pass=$((pass + 1))
@@ -30,8 +31,13 @@ run_suite() {
     done
 }
 
-run_suite "fp32"  --weights "$WEIGHTS_FP32"
-run_suite "int16" --quant --weights "$WEIGHTS_QUANT"
+run_suite "$BINARY" "fp32"  --weights "$WEIGHTS_FP32"
+run_suite "$BINARY" "int16" --quant --weights "$WEIGHTS_QUANT"
+
+# Also test the 32-bit MMX build (assembly dot product) if it exists.
+if [ -x "${SCRIPT_DIR}/build/inference-linux32" ]; then
+    run_suite "${SCRIPT_DIR}/build/inference-linux32" "int16-x86" --quant --weights "$WEIGHTS_QUANT"
+fi
 
 echo "Results: $pass passed, $fail failed out of $((pass + fail))"
 

@@ -8,6 +8,11 @@
  *   layer 0 : int16 x int16 + int32 bias → int32, ReLU, >> 16 → int16
  *   layer 1 : int16 x int16 + int32 bias → int32
  *   output  : argmax over int32 logits (scale-invariant)
+ *
+ * The matmuls use the int16_dot() helper (see include/int16_dot.h):
+ * on 32-bit x86 builds compiled with MMX support it is the assembly
+ * kernel (src/int16_dot.S, pmaddwd), everywhere else the pure C
+ * fallback defined below.
  */
 
 #include <stdio.h>
@@ -15,6 +20,35 @@
 
 #include "types.h"
 #include "model_int16.h"
+#include "int16_dot.h"
+
+/*
+ * Assembly int16 dot product support. Requires 32-bit mode (__i386__) and
+ * MMX (__MMX__, via -mmmx or a -march that includes MMX). In 64-bit mode
+ * __MMX__ is predefined (MMX is in the x86-64 baseline ISA) but the
+ * assembly kernel only exists for 32-bit targets. In 64-bit mode, the
+ * compiler will auto-vectorize the scalar loop with much better
+ * SSE/AVX performance than MMX.
+ */
+#if defined(__i386__) && defined(__MMX__)
+#define MODEL_INT16_USE_ASM_DOT 1
+#endif
+
+#ifndef MODEL_INT16_USE_ASM_DOT
+/*
+ * Pure C fallback for int16_dot(), used in builds without the 32-bit MMX
+ * assembly kernel. int32 accumulation, matching the assembly version.
+ */
+int32_t int16_dot(const int16_t *a, const int16_t *b, int n)
+{
+    int32_t sum = 0;
+    int i;
+    for (i = 0; i < n; i++) {
+        sum += (int32_t)a[i] * (int32_t)b[i];
+    }
+    return sum;
+}
+#endif
 
 /* Magic number: "NMST" in little-endian (same header as the fp32 format). */
 #define WEIGHTS_MAGIC 0x4E4D5354U
@@ -202,17 +236,14 @@ int model_int16_predict(const model_int16_t *model, const int16_t input[MODEL_IN
     int16_t hidden_q[MODEL_HIDDEN];
     int32_t logits[MODEL_OUTPUT];
     int32_t best_val;
-    int i, j, best;
+    int i, best;
 
     if (!model)
         return -1;
 
-    /* Layer 0: linear(784, 64) + ReLU, int32 accumulation */
+    /* Layer 0: linear(784, 64) + ReLU, int32 accumulation. */
     for (i = 0; i < MODEL_HIDDEN; i++) {
-        int32_t sum = model->b0[i];
-        for (j = 0; j < MODEL_INPUT; j++) {
-            sum += (int32_t)input[j] * (int32_t)model->w0[i][j];
-        }
+        int32_t sum = model->b0[i] + int16_dot(input, model->w0[i], MODEL_INPUT);
         hidden[i] = (sum > 0) ? sum : 0;
     }
 
@@ -221,13 +252,9 @@ int model_int16_predict(const model_int16_t *model, const int16_t input[MODEL_IN
         hidden_q[i] = (int16_t)(hidden[i] >> 16);
     }
 
-    /* Layer 1: linear(64, 10), int32 accumulation */
+    /* Layer 1: linear(64, 10), int32 accumulation. */
     for (i = 0; i < MODEL_OUTPUT; i++) {
-        int32_t sum = model->b1[i];
-        for (j = 0; j < MODEL_HIDDEN; j++) {
-            sum += (int32_t)hidden_q[j] * (int32_t)model->w1[i][j];
-        }
-        logits[i] = sum;
+        logits[i] = model->b1[i] + int16_dot(hidden_q, model->w1[i], MODEL_HIDDEN);
     }
 
     /* Argmax (scale-invariant, no dequantization needed). */
