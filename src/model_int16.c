@@ -11,8 +11,8 @@
  *
  * The matmuls use the int16_dot() helper (see include/int16_dot.h):
  * on 32-bit x86 builds compiled with MMX support it is the assembly
- * kernel (src/int16_dot.S, pmaddwd), everywhere else the pure C
- * fallback defined below.
+ * kernel (src/int16_dot_x86_mmx.S, pmaddwd), everywhere else the pure C
+ * fallback defined in file src/int16_dot.c.
  */
 
 #include <stdio.h>
@@ -21,34 +21,6 @@
 #include "types.h"
 #include "model_int16.h"
 #include "int16_dot.h"
-
-/*
- * Assembly int16 dot product support. Requires 32-bit mode (__i386__) and
- * MMX (__MMX__, via -mmmx or a -march that includes MMX). In 64-bit mode
- * __MMX__ is predefined (MMX is in the x86-64 baseline ISA) but the
- * assembly kernel only exists for 32-bit targets. In 64-bit mode, the
- * compiler will auto-vectorize the scalar loop with much better
- * SSE/AVX performance than MMX.
- */
-#if defined(__i386__) && defined(__MMX__)
-#define MODEL_INT16_USE_ASM_DOT 1
-#endif
-
-#ifndef MODEL_INT16_USE_ASM_DOT
-/*
- * Pure C fallback for int16_dot(), used in builds without the 32-bit MMX
- * assembly kernel. int32 accumulation, matching the assembly version.
- */
-int32_t int16_dot(const int16_t *a, const int16_t *b, int n)
-{
-    int32_t sum = 0;
-    int i;
-    for (i = 0; i < n; i++) {
-        sum += (int32_t)a[i] * (int32_t)b[i];
-    }
-    return sum;
-}
-#endif
 
 /* Magic number: "NMST" in little-endian (same header as the fp32 format). */
 #define WEIGHTS_MAGIC 0x4E4D5354U
