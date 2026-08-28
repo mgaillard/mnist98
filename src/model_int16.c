@@ -219,6 +219,7 @@ int model_int16_predict(const model_int16_t *model, const int16_t input[MODEL_IN
         hidden[i] = (sum > 0) ? sum : 0;
     }
 
+    /* TODO: accelerate with MMX: PSRAD + PACKSSDW */
     /* Rescale to int16 range for layer 1. */
     for (i = 0; i < MODEL_HIDDEN; i++) {
         hidden_q[i] = (int16_t)(hidden[i] >> 16);

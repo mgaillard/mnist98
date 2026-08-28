@@ -35,8 +35,8 @@ run_suite "$BINARY" "fp32"  --weights "$WEIGHTS_FP32"
 run_suite "$BINARY" "int16" --quant --weights "$WEIGHTS_QUANT"
 
 # Also test the 32-bit MMX build (assembly dot product) if it exists.
-if [ -x "${SCRIPT_DIR}/build/inference-linux32" ]; then
-    run_suite "${SCRIPT_DIR}/build/inference-linux32" "int16-x86" --quant --weights "$WEIGHTS_QUANT"
+if [ -x "${SCRIPT_DIR}/build/inference-linux32-sse" ]; then
+    run_suite "${SCRIPT_DIR}/build/inference-linux32-sse" "int16-x86" --quant --weights "$WEIGHTS_QUANT"
 fi
 
 echo "Results: $pass passed, $fail failed out of $((pass + fail))"
