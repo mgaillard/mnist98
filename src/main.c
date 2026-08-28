@@ -1,5 +1,9 @@
 /* main.c — MNIST digit classification from a BMP image.
  * C89-compatible.
+ *
+ * Two models are available:
+ *   - fp32 model (default): float weights, float forward pass
+ *   - quantized int16 model (--quant): integer-only forward pass
  */
 
 #include <stdio.h>
@@ -9,14 +13,34 @@
 
 #include "bmp.h"
 #include "model_fp32.h"
+#include "model_int16.h"
+
+/* Predict function pointer so the benchmark can time either model. */
+typedef int (*predict_fn)(const void *model, const void *input);
+
+static int predict_fp32(const void *model, const void *input)
+{
+    return model_fp32_predict((const model_fp32_t *)model, (const float *)input);
+}
+
+static int predict_int16(const void *model, const void *input)
+{
+    return model_int16_predict((const model_int16_t *)model, (const int16_t *)input);
+}
 
 static void usage(const char *prog)
 {
-    fprintf(stderr, "Usage: %s <image.bmp> [--weights weights.bin] [--benchmark N]\n", prog);
+    fprintf(stderr,
+            "Usage: %s <image.bmp> [--quant] [--weights weights.bin] [--benchmark N]\n"
+            "  --quant       use the quantized int16 model (default: fp32 model)\n"
+            "  --weights     path to the weights file\n"
+            "                (default: weights.bin, or weights_quant.bin with --quant)\n"
+            "  --benchmark N run the forward pass N extra times and report throughput\n",
+            prog);
     exit(EXIT_FAILURE);
 }
 
-static void benchmark(const model_fp32_t *model, const float input[MODEL_INPUT], int count)
+static void benchmark(predict_fn predict, const void *model, const void *input, int count)
 {
     clock_t t_start, t_end;
     double elapsed_sec;
@@ -25,11 +49,11 @@ static void benchmark(const model_fp32_t *model, const float input[MODEL_INPUT],
     int i;
 
     /* Warm-up run */
-    model_fp32_predict(model, input);
+    predict(model, input);
 
     t_start = clock();
     for (i = 0; i < count; i++) {
-        model_fp32_predict(model, input);
+        predict(model, input);
     }
     t_end = clock();
 
@@ -51,16 +75,21 @@ int main(int argc, char *argv[])
 {
     const char *img_path;
     const char *weights_path;
-    int benchmark_count;
+    const void *model;
+    const void *input;
+    predict_fn predict;
     int pixels_raw[MODEL_INPUT];
-    float input[MODEL_INPUT];
+    float input_f32[MODEL_INPUT];
+    int16_t input_q[MODEL_INPUT];
     int pixels[28][28];
-    model_fp32_t *model;
+    int quant;
+    int benchmark_count;
     int predicted;
     int i, x, y;
 
     /* Defaults. */
-    weights_path = "weights.bin";
+    weights_path = NULL;
+    quant = 0;
     benchmark_count = 0;
 
     if (argc < 2)
@@ -81,22 +110,19 @@ int main(int argc, char *argv[])
                 fprintf(stderr, "Error: benchmark count must be positive\n");
                 return EXIT_FAILURE;
             }
+        } else if (strcmp(argv[i], "--quant") == 0) {
+            quant = 1;
         } else {
             fprintf(stderr, "Error: unknown option '%s'\n", argv[i]);
             usage(argv[0]);
         }
     }
 
-    /* Allocate model on HEAP to avoid stack overflow (~204 KB) */
-    model = (model_fp32_t *)malloc(sizeof(model_fp32_t));
-    if (!model) {
-        fprintf(stderr, "Error: out of memory allocating model structure\n");
-        return EXIT_FAILURE;
-    }
+    if (!weights_path)
+        weights_path = quant ? "weights_quant.bin" : "weights.bin";
 
     /* Load the BMP image. */
     if (load_bmp(img_path, pixels) != 0) {
-        free(model);
         return EXIT_FAILURE;
     }
 
@@ -107,23 +133,57 @@ int main(int argc, char *argv[])
         }
     }
 
-    /* Normalize to MNIST training distribution. */
-    model_fp32_normalize_input(pixels_raw, input);
+    /* Allocate model on HEAP to avoid stack overflow (~100-200 KB) */
+    if (quant) {
+        model_int16_t *model_q = (model_int16_t *)malloc(sizeof(model_int16_t));
+        if (!model_q) {
+            fprintf(stderr, "Error: out of memory allocating model structure\n");
+            return EXIT_FAILURE;
+        }
 
-    /* Load model weights. */
-    if (model_fp32_load_weights(weights_path, model) != 0) {
-        free(model);
-        return EXIT_FAILURE;
+        /* Convert raw pixels to the int16 encoding. */
+        model_int16_quantize_input(pixels_raw, input_q);
+
+        /* Load the quantized weights. */
+        if (model_int16_load_weights(weights_path, model_q) != 0) {
+            free(model_q);
+            return EXIT_FAILURE;
+        }
+
+        /* Run inference */
+        predicted = model_int16_predict(model_q, input_q);
+        model = model_q;
+        input = input_q;
+        predict = predict_int16;
+    } else {
+        model_fp32_t *model_f = (model_fp32_t *)malloc(sizeof(model_fp32_t));
+        if (!model_f) {
+            fprintf(stderr, "Error: out of memory allocating model structure\n");
+            return EXIT_FAILURE;
+        }
+
+        /* Normalize to MNIST training distribution. */
+        model_fp32_normalize_input(pixels_raw, input_f32);
+
+        /* Load the fp32 weights. */
+        if (model_fp32_load_weights(weights_path, model_f) != 0) {
+            free(model_f);
+            return EXIT_FAILURE;
+        }
+
+        /* Run inference */
+        predicted = model_fp32_predict(model_f, input_f32);
+        model = model_f;
+        input = input_f32;
+        predict = predict_fp32;
     }
 
-    /* Run inference */
-    predicted = model_fp32_predict(model, input);
     printf("%d\n", predicted);
 
     if (benchmark_count > 0) {
-        benchmark(model, input, benchmark_count);
+        benchmark(predict, model, input, benchmark_count);
     }
 
-    free(model);
+    free((void *)model);
     return EXIT_SUCCESS;
 }

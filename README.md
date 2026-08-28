@@ -61,9 +61,9 @@ Training saves the best model to two formats:
 
 ## Building
 
-Requires `gcc` and `i686-w64-mingw32-gcc` (MinGW cross-compiler). On Ubuntu the Windows 32-bit compiler can be installed with:
+Requires `gcc`, `i686-w64-mingw32-gcc` (MinGW cross-compiler) and `gcc-multilib` (32-bits libc). On Ubuntu the Windows 32-bit compiler can be installed with:
 ```bash
-sudo apt install gcc-mingw-w64-i686-win32
+sudo apt install gcc-mingw-w64-i686-win32 gcc-multilib
 ```
 
 Build the executables with:
