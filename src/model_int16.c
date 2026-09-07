@@ -21,6 +21,7 @@
 #include "types.h"
 #include "model_int16.h"
 #include "int16_dot.h"
+#include "scale_int32_to_int16.h"
 
 /* Magic number: "NMST" in little-endian (same header as the fp32 format). */
 #define WEIGHTS_MAGIC 0x4E4D5354U
@@ -219,11 +220,8 @@ int model_int16_predict(const model_int16_t *model, const int16_t input[MODEL_IN
         hidden[i] = (sum > 0) ? sum : 0;
     }
 
-    /* TODO: accelerate with MMX: PSRAD + PACKSSDW */
     /* Rescale to int16 range for layer 1. */
-    for (i = 0; i < MODEL_HIDDEN; i++) {
-        hidden_q[i] = (int16_t)(hidden[i] >> 16);
-    }
+    scale_int32_to_int16(hidden, hidden_q, MODEL_HIDDEN);
 
     /* Layer 1: linear(64, 10), int32 accumulation. */
     for (i = 0; i < MODEL_OUTPUT; i++) {
