@@ -1,4 +1,4 @@
-/* int16_dot.S — Dot product of int16 vectors using MMX (32-bit x86, cdecl).
+/* int16_dot_x86_mmx.S — Dot product of int16 vectors using MMX (32-bit x86, cdecl).
  *
  * C interface (see include/int16_dot.h):
  *
@@ -97,34 +97,28 @@ CNAME(int16_dot):
 
 .p2align 4
 .Ldot_loop_unrolled_4x:
-    /* Block 0: elements 0..3 */
+    /* Stage 1: Load vector A (all 4 blocks / 16 elements = 32 bytes) */
     movq    (%esi), %mm1
-    movq    (%edx), %mm2
-    pmaddwd %mm2, %mm1
+    movq    8(%esi), %mm2
+    movq    16(%esi), %mm4
+    movq    24(%esi), %mm5
 
-    /* Block 1: elements 4..7 */
-    movq    8(%esi), %mm4
-    movq    8(%edx), %mm5
-    pmaddwd %mm5, %mm4
+    /* Stage 2: Multiply with vector B directly from memory.
+     * PMADDWD takes 2 memory/register operands, avoiding extra MOVQ loads for B.
+     * Hides load-to-use latency of Stage 1. */
+    pmaddwd (%edx), %mm1
+    pmaddwd 8(%edx), %mm2
+    pmaddwd 16(%edx), %mm4
+    pmaddwd 24(%edx), %mm5
 
-    /* Accumulate previous block while next PMADDWD executes */
+    /* Stage 3: Accumulate into four independent MMX accumulators (%mm0, %mm3, %mm6, %mm7).
+     * Hides PMADDWD execution latency (typically 3 cycles on P6). */
     paddd   %mm1, %mm0
+    paddd   %mm2, %mm3
+    paddd   %mm4, %mm6
+    paddd   %mm5, %mm7
 
-    /* Block 2: elements 8..11 */
-    movq    16(%esi), %mm1
-    movq    16(%edx), %mm2
-    pmaddwd %mm2, %mm1
-
-    paddd   %mm4, %mm3
-
-    /* Block 3: elements 12..15 */
-    movq    24(%esi), %mm4
-    movq    24(%edx), %mm5
-    pmaddwd %mm5, %mm4
-
-    paddd   %mm1, %mm6
-    paddd   %mm4, %mm7
-
+    /* Advance memory pointers and loop counter */
     addl    $32, %esi
     addl    $32, %edx
     decl    %ecx
@@ -139,7 +133,6 @@ CNAME(int16_dot):
     movd    %mm0, %eax                 /* low 32 bits */
     psrlq   $32, %mm0
     movd    %mm0, %edx                 /* high 32 bits */
-    emms
     popl    %esi
     addl    %edx, %eax                 /* final dot product result */
     ret

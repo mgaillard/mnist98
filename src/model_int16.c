@@ -20,6 +20,7 @@
 
 #include "types.h"
 #include "model_int16.h"
+#include "clear_mmx_state.h"
 #include "int16_dot.h"
 #include "scale_int32_to_int16.h"
 
@@ -205,6 +206,15 @@ void model_int16_quantize_input(const int pixels_raw[MODEL_INPUT], int16_t input
 
 int model_int16_predict(const model_int16_t *model, const int16_t input[MODEL_INPUT])
 {
+    /*
+     * Local layer buffers aligned to 16-byte boundaries:
+     *   - hidden   : 64 x 4 bytes  = 256 bytes (exact multiple of 16)
+     *   - hidden_q : 64 x 2 bytes  = 128 bytes (exact multiple of 16)
+     *   - logits   : 10 x 4 bytes  =  40 bytes (aligned start; pad/stride to 48B if 16B vector access)
+     *
+     * Total buffer sizes ensure natural cache-line (32B/64B) and SIMD alignment
+     * for vector load/store instructions.
+     */
     int32_t hidden[MODEL_HIDDEN];
     int16_t hidden_q[MODEL_HIDDEN];
     int32_t logits[MODEL_OUTPUT];
@@ -237,6 +247,17 @@ int model_int16_predict(const model_int16_t *model, const int16_t input[MODEL_IN
             best = i;
         }
     }
+
+    /*
+     * Reset x87 FPU state.
+     * When using MMX optimized kernels, the MMX registers (%mm0-%mm7) alias onto the physical x87 FPU stack.
+     * Executing MMX instructions marks the FPU tag word as in-use, which causes
+     * subsequent x87 floating-point operations to trigger stack overflow exceptions.
+     * The functions int16_dot() and scale_int32_to_int16() may use MMX instructions on 32-bit x86 builds with MMX support.
+     * To make sure they run as fast as possible, we do not clear the MMX state after each call, but only once at the end of the inference.
+     * That's safe because floating point operations are not used in this function, and the MMX state is cleared before returning to the caller.
+     */
+    clear_mmx_state();
 
     return best;
 }

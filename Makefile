@@ -29,9 +29,9 @@ LDFLAGS     :=
 BUILD_DIR   := build
 
 INF_SRC_BASE    := src/main.c src/model_fp32.c src/model_int16.c src/bmp.c
-INF_SRC         := $(INF_SRC_BASE) src/int16_dot.c src/scale_int32_to_int16.c         # 64-bit targets or 32-bit targets (pure C dot product)
-INF_SRC_X86_MMX := $(INF_SRC_BASE) src/int16_dot_x86_mmx.S src/scale_int32_to_int16.c # 32-bit targets with MMX only
-INF_HDR         := include/types.h include/model_fp32.h include/model_int16.h include/int16_dot.h include/scale_int32_to_int16.h include/bmp.h
+INF_SRC         := $(INF_SRC_BASE) src/clear_mmx_state.c src/int16_dot.c src/scale_int32_to_int16.c                         # 64-bit targets or 32-bit targets (pure C dot product)
+INF_SRC_X86_MMX := $(INF_SRC_BASE) src/clear_mmx_state_x86_mmx.S src/int16_dot_x86_mmx.S src/scale_int32_to_int16_x86_mmx.S # 32-bit targets with MMX only
+INF_HDR         := include/types.h include/model_fp32.h include/model_int16.h include/int16_dot.h include/scale_int32_to_int16.h include/clear_mmx_state.h include/bmp.h
 
 INF_TARGET_LINUX_DEBUG   := $(BUILD_DIR)/inference-debug
 INF_TARGET_LINUX_RELEASE := $(BUILD_DIR)/inference
