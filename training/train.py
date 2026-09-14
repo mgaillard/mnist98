@@ -16,20 +16,53 @@ from model_quant import QuantizedMLP
 
 
 def get_dataloader(train: bool, batch_size: int = 128) -> DataLoader:
-    """Return a MNIST DataLoader."""
-    # Normalise so that pixels have mean 0.1307 and std 0.3081 (the values for the MNIST training set).
-    # Black pixels become -0.4242, white pixels become 2.8215.
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,)),
-    ])
+    """Return a MNIST DataLoader with train-time data augmentation."""
+    if train:
+        transform = transforms.Compose([
+            # 1. Random subtle rotation
+            transforms.RandomRotation(degrees=(-10, 10)),
+            
+            # 2. Small random translation (shifts pixel locations)
+            transforms.RandomAffine(
+                degrees=0, 
+                translate=(0.08, 0.08),  # Shift up to ~2 pixels left/right/up/down
+                scale=(0.95, 1.05)       # Subtle zoom in/out
+            ),
+            
+            transforms.ToTensor(),
+            
+            # 3. Randomly erase small patches (forces redundant feature representation)
+            transforms.RandomErasing(
+                p=0.2,                  # 20% chance per image
+                scale=(0.02, 0.10),     # Erase between 2% and 10% of image area
+                value=0                 # Fill erased box with 0 (background)
+            ),
+            
+            # Normalization comes LAST (or after ToTensor and RandomErasing)
+            transforms.Normalize((0.1307,), (0.3081,)),
+        ])
+    else:
+        # Keep test evaluation clean and deterministic
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307,), (0.3081,)),
+        ])
+
     dataset = datasets.MNIST(
         root="./data",
         train=train,
         download=True,
         transform=transform,
     )
-    return DataLoader(dataset, batch_size=batch_size, shuffle=train)
+
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=train,
+        num_workers=4,                        # Parallelize data loading (use 2 to 4 on Windows)
+        pin_memory=torch.cuda.is_available(), # Allocates page-locked CPU memory for faster GPU transfers
+        persistent_workers=True,              # Keeps worker processes alive between epochs (avoids process recreation overhead)
+    )
 
 
 def train_one_epoch(model: MLP, loader: DataLoader, optimizer, device) -> tuple[float, float]:
@@ -89,8 +122,9 @@ def evaluate_quantized(model: QuantizedMLP, loader: DataLoader, device) -> float
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train MLP on MNIST")
     parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
-    parser.add_argument("--batch-size", type=int, default=128, help="Batch size")
-    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
+    parser.add_argument("--batch-size", type=int, default=256, help="Batch size")
+    parser.add_argument("--lr", type=float, default=3e-3, help="Learning rate")
+    parser.add_argument("--wd", type=float, default=1e-4, help="Weight decay")
     parser.add_argument("--output", type=str, default="checkpoints/weights", help="Output path (without extension)")
     args = parser.parse_args()
 
@@ -101,7 +135,11 @@ def main() -> None:
     test_loader = get_dataloader(train=False, batch_size=args.batch_size)
 
     model = MLP().to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+
+    if device.type == "cuda":
+        model = torch.compile(model)  # Fuses Linear + ReLU into optimized CUDA kernel
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
 
     best_acc = 0.0
     for epoch in range(1, args.epochs + 1):
